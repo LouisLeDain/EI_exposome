@@ -1,0 +1,35 @@
+---
+title: "Work"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(factoextra)
+```
+
+## Read data exposome
+
+```{r}
+load("data/exposome.RData")
+codebook = as.data.frame(read_xlsx("data/codebook.xlsx"))
+exposome_num = exposome[ , codebook$variable_name[1:222][which(codebook$var_type[1:222] == "numeric")]]
+exposome_fac = exposome[ , codebook$variable_name[1:222][which(codebook$var_type[1:222] == "factor")]]
+kable(head(exposome))
+```
+
+## Seperate pregnancy and psotnatal variables
+
+```{r}
+X_num_preg = exposome_num[ ,grep("preg", colnames(exposome_num))]
+X_num_post = exposome_num[ ,grep("post", colnames(exposome_num))]
+```
+
+## Provide ACP study
+
+```{r}
+fit = prcomp(X_num_preg, scale = TRUE)
+fviz_pca_biplot(fit, habillage = covariates$h_cohort)
+```
