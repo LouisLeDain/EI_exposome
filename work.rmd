@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(knitr)
 library(readxl)
 library(factoextra)
+library(pheatmap)
 ```
 
 ## Read data exposome
@@ -24,12 +25,89 @@ kable(head(exposome))
 
 ```{r}
 X_num_preg = exposome_num[ ,grep("preg", colnames(exposome_num))]
-X_num_post = exposome_num[ ,grep("post", colnames(exposome_num))]
+X_num_post = exposome_num[ ,-grep("preg", colnames(exposome_num))]
 ```
 
-## Provide ACP study
+## Provide ACP study (pregnancy)
 
 ```{r}
 fit = prcomp(X_num_preg, scale = TRUE)
 fviz_pca_biplot(fit, habillage = covariates$h_cohort)
 ```
+
+## Provide ACP study (postnatal)
+
+```{r}
+fit = prcomp(X_num_post, scale = TRUE)
+fviz_pca_biplot(fit, habillage = covariates$h_cohort)
+```
+
+## Test of importance of variables 
+
+Build up a matrix containing the p-values of the test of importance between exposome and phenotypes (according to the covariable cohort)
+It consists of generalized linear models
+
+```{r}
+df = data.frame(exposome_num, 
+                cohort = covariates$h_cohort,
+                phenotype[, -1])
+
+column_names_exposome <- colnames(exposome_num)
+head(column_names_exposome)
+column_names_phenotypes <- colnames(phenotype)
+head(column_names_phenotypes)
+p_value_table = matrix(NA, nrow = ncol(exposome_num), ncol = ncol(phenotype) - 2)
+
+for (i in 1:ncol(exposome_num)) {
+    fit0 = glm(phenotype$e3_bw~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$e3_bw~covariates$h_cohort + exposome_num[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 1] = p_val
+}
+
+for (i in 1:ncol(exposome_num)) {
+    fit0 = glm(phenotype$hs_asthma~covariates$h_cohort , family = "binomial", data  = df)
+    fit1 = glm(phenotype$hs_asthma~covariates$h_cohort + exposome_num[,i], family = "binomial", data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 2] = p_val
+}
+
+for (i in 1:ncol(exposome_num)) {
+    fit0 = glm(phenotype$hs_zbmi_who~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$hs_zbmi_who~covariates$h_cohort + exposome_num[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 3] = p_val
+}
+
+for (i in 1:ncol(exposome_num)) {
+    fit0 = glm(phenotype$hs_correct_raven~covariates$h_cohort , family = poisson, data  = df)
+    fit1 = glm(phenotype$hs_correct_raven~covariates$h_cohort + exposome_num[,i], family = poisson, data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 4] = p_val
+}
+
+for (i in 1:ncol(exposome_num)) {
+    fit0 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort + exposome_num[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 5] = p_val
+}
+
+
+kable(p_value_table)
+```	
+
+## Heatmap of p-values 
+
+```{r}
+pheatmap(p_value_table, 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         color = colorRampPalette(c("blue", "red"))(100))
+```
+
