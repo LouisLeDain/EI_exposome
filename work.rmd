@@ -98,7 +98,7 @@ for (i in 1:ncol(exposome_num)) {
     p_value_table[i, 5] = p_val
 }
 
-
+rownames(p_value_table) <- colnames(exposome_num)
 kable(p_value_table)
 ```	
 
@@ -112,38 +112,14 @@ kable(p_value_table)
 ```
 
 ```{r}	
-# xxx = data.frame(codebook$variable_name, codebook$family)
-# rownames(xxx) = xxx$codebook.variable_name
-# yyy = xxx[-1]
-# yyy[colnames(exposome_num),]
-# A = data.frame(family = yyy[colnames(exposome_num),])
-# rownames(A) = colnames(exposome_num)
-# annotation_col = list(family = A)
-# pheatmap(p_value_table, 
-#          cluster_rows = TRUE, 
-#          cluster_cols = TRUE, 
-#          annotation_col = annotation_col,
-#          color = colorRampPalette(c("blue", "orange"))(100))
-# Step 1: Create the `xxx` DataFrame
+mat_row = data.frame(family = codebook$family[1:222][which(codebook$variable_name[1:222] %in% rownames(p_value_table))])
+rownames(mat_row) <- rownames(p_value_table)
 
-xxx = data.frame(variable_name = codebook$variable_name, family = codebook$family)
-rownames(xxx) = xxx$variable_name
-
-# Step 2: Keep only the `family` column in `yyy`
-yyy = xxx[, "family", drop = FALSE]
-
-# Step 3: Create the `A` DataFrame
-A = data.frame(family = yyy[colnames(exposome_num), , drop = FALSE])
-rownames(A) = colnames(exposome_num)
-
-# Step 4: Create the `annotation_col` list
-annotation_col = list(family = A)
-
-# Step 5: Generate the heatmap
 pheatmap(p_value_table, 
          cluster_rows = TRUE, 
          cluster_cols = TRUE, 
-         annotation_col = annotation_col,
-         color = colorRampPalette(c("blue", "orange"))(100))
-
+         annotation_row = mat_row,
+         color = colorRampPalette(c("azure2", "black"))(50),
+         font_size = 10,
+         show_rownames = FALSE)
 ```
