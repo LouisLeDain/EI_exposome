@@ -1,0 +1,768 @@
+---
+title: "Compte Rendu EI Exposome - Groupe 3"
+author: "Capucine Leroy, Mhammed Bouzouba, Sami Rabinovitch, Remi Lechevalier, Louis Le Dain"
+date: "2024-06-11"
+output: html_document
+---
+
+## I. Introduction
+
+Les expositions quotidiennes à l'environnement d’un individu peuvent conditionner son état de santé futur et expliquer son état de santé actuel. Ces facteurs extérieurs influençant la santé d’un individu sont regroupés sous le nom d’exposome.
+Jusqu’à récemment, la multiplicité des facteurs quotidiens et leurs intéractions rendaient leur étude complexe.
+Cependant, le récent développement d’outils statistiques ouvre de nouvelles possibilités d’analyse des tendances générales et de compréhension des corrélations entre les exposomes et la santé, ainsi que leurs éventuelles combinaisons pouvant provoquer des effets inattendus.
+
+Le projet HELIX (Human Early-Life Exposome) est l'un des premiers projets à adopter cette vision globale de l'exposome.
+Entre 2013 et 2017, des données ont été collectées sur six cohortes mères-enfants, comprenant 32 000 paires et une sous-cohorte de 1301 enfants suivis de manière standardisée dans la tranche d'âge 6-11 ans.
+Ce projet a permis de cartographier plus de 200 facteurs environnementaux, allant des habitudes de vie et facteurs socio-économiques aux polluants atmosphériques et aux substances chimiques présentes dans l'environnement. 
+
+Dans ce cadre, et parmi les nombreuses analyses qui peuvent être menées à partir de ce jeu de données, il est possible de s’intéresser de plus près à l’influence d’un milieu urbain sur la santé de l’enfant, en particulier sur son développement cognitif.
+En effet, les prédictions démographiques annoncent une concentration de la population dans les zones urbanisées.
+En même temps, la pollution (atmosphérique, sonore etc.) croissante des villes contribue à rendre de plus en plus nocif le milieu urbain.
+L'objectif de cette étude est donc d’évaluer l'influence des variables de l'environnement construit, c'est-à-dire les facteurs liés à la densité de population, la densité du bâti, la connectivité des espaces, à la pollution sonore, de l’air et de l’eau etc, sur le développement cognitif des enfants, mesuré par le phénotype *Neuro behavior*, ainsi que sur leur quotient intellectuel (QI).
+Cette étude se concentrera donc spécifiquement sur les différences entre les zones urbaines et rurales, en utilisant des méthodes de régression linéaire pour quantifier les associations entre ces expositions environnementales et les phénotypes d'intérêt, et pourra contribuer à éclairer les politiques en matière de santé publique et d’aménagement urbain.
+
+### Présentation et prise en main du jeu de données
+
+Le jeu de données se découpe en des grandes familles d’exposomes, une famille de phénotypes et une famille de facteurs de confusion.
+Les premières familles fournissent les variables explicatives à notre étude, la deuxième famille constitue la famille des variables à expliquer.
+La dernière contient les variables qui sont corrélées à la fois aux variables explicatives et aux variables expliquées et qui peuvent donc fausser les résultats. 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(factoextra)
+library(pheatmap)
+library(mixOmics)
+library(RGCCA)
+library(ggplot2)
+library(dplyr)
+library(pheatmap)
+library(ggplot2)
+library(broom)
+```
+
+#### Chargement des données
+
+```{r, include=FALSE}
+load("data/exposome.RData")
+codebook = as.data.frame(read_xlsx("data/codebook.xlsx"))
+exposome_num = exposome[ , codebook$variable_name[1:222][which(codebook$var_type[1:222] == "numeric")]]
+exposome_fac = exposome[ , codebook$variable_name[1:222][which(codebook$var_type[1:222] == "factor")]]
+```
+
+#### Etude préliminaire des données
+
+Avant toute étude approfondie, jetons un oeil aux données dans leur ensemble afin de déceler des potentielles tendances générales qui pourraient influencer notre démarche par la suite.
+Dans le tableau ci-après dénommé *pvalue table*, on regroupe les valeurs des p-valeurs obtenues lors de tests ANOVA des différentes expositions au regard des phénotypes à notre disposition.
+
+```{r, echo = FALSE}
+df = data.frame(exposome, 
+                cohort = covariates$h_cohort,
+                phenotype[, -1])
+
+column_names_exposome <- colnames(exposome)
+column_names_phenotypes <- colnames(phenotype)
+p_value_table = matrix(NA, nrow = ncol(exposome), ncol = ncol(phenotype) - 2)
+
+for (i in 1:ncol(exposome)) {
+    fit0 = glm(phenotype$e3_bw~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$e3_bw~covariates$h_cohort + exposome[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 1] = p_val
+}
+
+for (i in 1:ncol(exposome)) {
+    fit0 = glm(phenotype$hs_asthma~covariates$h_cohort , family = "binomial", data  = df)
+    fit1 = glm(phenotype$hs_asthma~covariates$h_cohort + exposome[,i], family = "binomial", data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 2] = p_val
+}
+
+for (i in 1:ncol(exposome)) {
+    fit0 = glm(phenotype$hs_zbmi_who~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$hs_zbmi_who~covariates$h_cohort + exposome[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 3] = p_val
+}
+
+for (i in 1:ncol(exposome)) {
+    fit0 = glm(phenotype$hs_correct_raven~covariates$h_cohort , family = poisson, data  = df)
+    fit1 = glm(phenotype$hs_correct_raven~covariates$h_cohort + exposome[,i], family = poisson, data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 4] = p_val
+}
+
+for (i in 1:ncol(exposome)) {
+    fit0 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort + exposome[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 5] = p_val
+}
+
+rownames(p_value_table) <- colnames(exposome)
+colnames(p_value_table) <- colnames(phenotype)[2:6]
+
+kable(head(p_value_table))
+```
+
+Cette visualisation ne nous permet pas de saisir les tendances générales.
+On va donc représenter le tableau obtenu par une *heatmap*, un gradient de couleur.
+Cette évolution de couleur met en évidence les variables fortement corrélées aux différents phénotypes.
+
+```{r, echo = FALSE}
+mat_row = data.frame(family = codebook$family[1:222][which(codebook$variable_name[1:222] %in% rownames(p_value_table))])
+rownames(mat_row) <- rownames(p_value_table)[2:223]
+
+pheatmap(p_value_table, 
+         cluster_rows = FALSE, 
+         cluster_cols = TRUE, 
+         annotation_row = mat_row,
+         color = colorRampPalette(c("azure2", "black"))(50),
+         font_size = 10,
+         show_rownames = FALSE)
+```
+
+Lorsque regroupées par familles de variables, les expositions ne semblent pas présenter de tendances communes.
+Essayons plutôt de les regrouper par groupes d'influence égale.
+
+```{r, echo = FALSE}
+mat_row = data.frame(family = codebook$family[1:222][which(codebook$variable_name[1:222] %in% rownames(p_value_table))])
+rownames(mat_row) <- rownames(p_value_table)[2:223]
+
+pheatmap(p_value_table, 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         annotation_row = mat_row,
+         color = colorRampPalette(c("azure2", "black"))(50),
+         font_size = 10,
+         show_rownames = FALSE)
+```
+
+Si cette première analyse ne présente pas de résultats fondamentaux, on peut du moins en déduire qu'une simple étude par famille ne suffira pas à éclairer les différents mécanismes d'intéraction entre variables.
+
+### Préparation des données
+
+Une ACP réalisée sur l’ensemble des données révèle un effet cohorte prononcé, car les données ont été collectées dans 6 pays différents.
+
+```{r exposome, include=FALSE}
+load("data/exposome.RData")
+codebook = as.data.frame(read_xlsx("data/codebook.xlsx"))
+exposome_num = exposome[ , codebook$variable_name[1:222][which(codebook$var_type[1:222] == "numeric")]]
+```
+
+```{r, echo=FALSE}
+fit = prcomp(exposome_num, scale = TRUE)
+```
+
+Obsvervons une première projection des données en coloriant celles-ci par cohorte.
+
+```{r, echo=FALSE}
+fviz_pca_biplot(fit, habillage = covariates$h_cohort, axes = 1:2)
+```
+
+Dans un second temps, observons la projection des données en coloriant celles-ci par année de naissance.
+
+```{r, echo=FALSE}
+fviz_pca_biplot(fit, habillage = covariates$e3_yearbir_None, axes = 1:2)
+```
+
+La cohorte et l’année de naissance apparaissent alors comme des facteurs de confusion essentiels de notre étude. Nous n'avons pas davantage l'année de naissance mais nous nous sommes intéresséss à minimiser l'effet cohorte. 
+En effet, les personnes nées dans des pays différents ont pu être exposées à des environnements différents.
+Les niveaux de pollution, les régulations sur les produits chimiques, et les habitudes alimentaires varient d’un pays à l'autre.
+Il en est de même pour l’année de naissance Afin d’éliminer cet effet, les variables ont été normalisées par cohorte et par date de naissance, de sorte à se concentrer sur l’étude des exposomes uniquement.
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(factoextra)
+library(pheatmap)
+library(RGCCA)
+library(mixOmics)
+#LLL = lapply(L_num, function(x) mixOmics:::mean_centering_per_study(x, study = covariates$h_cohort, scale = T)$concat.data)
+```
+
+## II. Méthodes
+
+Notre démarche consiste tout d’abord à identifier les facteurs corrélés à l’urbanisation de l'environnement dans le jeu de données.
+Une fois ces facteurs identifiés, notre approche se scinde en deux études parallèles.
+
+La première étude se concentre sur les effets de chacun de ses facteurs et de certaines de leur combinaison pour identifier les plus influents.
+
+La deuxième a pour objectif de reconstituer une variable urbanization_rate à l’aide de ces facteurs précédemment identifiés, puis d’étudier la corrélation entre cette nouvelle variable et les deux variables Notons en effet que le jeu de données ne comprend pas une variable indiquant explicitement le taux d’urbanisation dans l’environnement de l’enfant.
+
+### Sélectionner et étudier les facteurs urbains
+
+#### Sélection
+
+Nous avons d’abord tenté d'effectuer un clustering afin de déterminer s'il était possible de distinguer deux groupes distincts (ville et non-ville) en fonction des variables de la famille build_environment.
+Pour ce faire, nous avons utilisé une classification par k-means.
+L'objectif était d'examiner si les caractéristiques de l'environnement construit pouvaient naturellement séparer les individus vivant en milieu urbain de ceux vivant en milieu rural.
+Cependant, les résultats de ces analyses n'ont pas été concluants.
+Les clusters obtenus ne permettent pas de distinguer de manière distincte 2 catégories attendues de ville et non-ville.
+Les variables de build_environment ne semblent pas avoir une capacité discriminante suffisante pour distinguer ces deux groupes de manière claire.
+
+La sélection des variables s'effectue par RGCCA.
+L’intérêt de cette méthode est de mettre en évidence les liens de corrélation en groupant les variables par famille.
+CUne première approche pour diminuer le nombre de variables de la famille “Built environment” est de faire une ACP Cependant cette méthode n’est pas suffisamment efficace.
+En effet si avec 2 dimensions nous conservons près de la moitié de l’information, qui chute rapidement et devient difficile d’obtenir des résultats fiables.
+C'est la raison pour laquelle nous avons opté pour une méthode par RGCCA plutôt qu'une ACP.
+
+Pour sélectionner les exposomes, nous disposons de la famille “Built environment” qui contient des exposomes tels que “building density”, “population density at home” ou “number of meters of public transport mode lines”.
+Nous faisons l'hypothèse que ces varaibles sont fortement corrélées au taux d’urbanisation.
+Le block de variable de réponse de la RGCCA sera la famille “Built environnement” et en “predictor blocks” toutes les autres familles.
+Nous n’avons pas sélectionné les covariates dans “predictor block” afin d’éviter de potentielles erreurs de confusion.
+Nous n’avons pas non plus pris en compte les phénotypes car c’est sur cette famille que nous voulons faire les analyses suivantes.
+Nous ne pouvons donc pas les prendre en tant que famille d’apprentissage et en tant que famille de test.
+
+Il s’agit d’une méthode linéaire.
+Elle consiste à attribuer un poids à chaque variable afin de maximiser la corrélation au carré totale.
+Afin de réduire le nombre de variables et ainsi simplifier grandement ce modèle, nous utilisons en plus une méthode sparsity.
+Elle consiste à fixer un seuil, et chaque variable n’est prise en compte que si sa corrélation est supérieure à ce seuil.
+Ce dernier n’est pas arbitraire, nous testons différentes valeurs et choisissons celui qui permet de maximiser la zstat, toujours dans le but de maximiser les corrélations entre variables.
+
+Nous supprimons toutes les variables dont la barre d’erreur passe par zéro, puisqu'il est impossible d'affirmer qu’elles sont significatives.
+Nous les classons ensuite par ordre croissant de significativité, et obtenons ainsi un nombre réduit d’exposomes décrivant le fait d’habiter en ville ou non.
+
+#### Etude des facteurs urbains
+
+Une méthode univariée, ayant recours au calcul des p-values, permet d’étudier l’influence de chaque facteur indépendamment des autres sur le développement cognitif des enfants.
+Cette méthode a déjà été utilisée dans le cadre de l'appropriation du jeu de données.
+En complément, une méthode multivariée utilisant un Volcano plot met en évidence les intéractions entre les différentes variables.
+
+Dans le cadre d'une analyse exposomique, où l'on cherche à comprendre l'effet de multiples expositions environnementales sur divers résultats de santé, un volcano plot peut nous permettre d’identifier les variables les plus significatives (généralement les points qui se trouvent en haut à gauche ou en haut à droite du graphique).
+En épidémiologie environnementale et dans les études exposomiques, il constitue une méthode visuelle précieuse pour l'analyse des données complexes et de grande dimension.
+Nous avons effectué une glm que nous analyserons à l'aide du Volcano plot, pour compléter l'analyse univariée par une analyse multivariée. 
+
+### Etude d'une variable *urbanization rate*
+
+A l'aide d'une méthode par clustering utilisant les données qui sont des variables numériques de Built_environment, nous avons cherché à constituer une variable donnant le taux d'urbanisation. L'hypothèse est la même que pour la RGCCA, c'est-à-dire que la famille Built_environment est une représentation pertinente du taux d'urbanisation. Une fois cette variable consituée, une méthode univariée pourrait permettre d'évaluer son influencesur les phénotypes de développement cognitif de l'enfant. 
+
+## III. Résultats
+
+### Etude par méthode RGCCA
+
+Préparation du jeu de données pour la RGCCA. 
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(factoextra)
+library(pheatmap)
+library(RGCCA)
+library(mixOmics)
+
+# Sélectionner les variables de la famille "Built environment"
+built_environment_vars <- codebook$variable_name[codebook$family == "Built environment"]
+air_pollution_vars <- codebook$variable_name[codebook$family == "Air Pollution"]
+indoor_air_vars <- codebook$variable_name[codebook$family == "Indoor air"]
+lifestyle_vars <- codebook$variable_name[codebook$family == "Lifestyle"]
+metals_vars <- codebook$variable_name[codebook$family == "Metals"]
+meteorological_vars <- codebook$variable_name[codebook$family == "Meteorological"]
+natural_spaces_vars <- codebook$variable_name[codebook$family == "Natural Spaces"]
+noise_vars <- codebook$variable_name[codebook$family == "Noise"]
+organochlorines__vars <- codebook$variable_name[codebook$family == "Organochlorines"]
+organophosphate_pesticides_vars <- codebook$variable_name[codebook$family == "Organophosphate pesticides"]
+BPDE_vars <- codebook$variable_name[codebook$family == "Polybrominated diphenyl ethers (PBDE)"]
+PFAS_vars <- codebook$variable_name[codebook$family == "Per- and polyfluoroalkyl substances (PFAS)"]
+phenols_vars <- codebook$variable_name[codebook$family == "Phenols"]
+phthalates_vars <- codebook$variable_name[codebook$family == "Phthalates"]
+social_economic_capital_vars <- codebook$variable_name[codebook$family == "Social and economic capital"]
+tabacco_smoke_vars <- codebook$variable_name[codebook$family == "Tobacco Smoke"]
+traffic_vars <- codebook$variable_name[codebook$family == "Traffic"]
+water_DBPs_vars <- codebook$variable_name[codebook$family == "Water DBPs"]
+
+built_environment = exposome[, built_environment_vars]
+
+L = list(air_pollution = exposome[, air_pollution_vars],
+         indoor_air = exposome[, indoor_air_vars],
+         lifestyle = exposome[, lifestyle_vars],
+         metals = exposome[, metals_vars],
+         meteorological = exposome[, meteorological_vars],
+         natural_spaces = exposome[, natural_spaces_vars],
+         noise = exposome[, noise_vars],
+         organochlorines = exposome[,organochlorines__vars ],
+         organophosphate_pesticides = exposome[, organophosphate_pesticides_vars],
+         BPDE = exposome[, BPDE_vars],
+         PFAS = exposome[, PFAS_vars],
+         phenols = exposome[, phenols_vars],
+         phthalates = exposome[, phthalates_vars],
+         social_economic_capital = exposome[, social_economic_capital_vars],
+         tabacco_smoke = exposome[, tabacco_smoke_vars],
+         traffic = exposome[, traffic_vars],
+         water_DBPs = exposome[, water_DBPs_vars],
+         built_environment = built_environment)
+
+
+#Création de la matrice de connection (pour relier les familles à built_environement)
+C = matrix(data = 0, nrow = 18, ncol = 18)
+C[ , 18] = C[18, ] = 1
+diag(C) = 0
+
+L_num = rgcca(L, connection = C, tau=rep(1,18))$call$blocks
+LLL = lapply(L_num, function(x) mixOmics:::mean_centering_per_study(x, study = covariates$h_cohort, scale = T)$concat.data)
+
+
+
+```
+
+```{r, echo = FALSE}
+#Utilisation de rgcca_permutation pour tester différentes valeurs de spasity (de 1/sqrt(pj) à 1) ; permet de prendre en compte seulement les exposomes les plus significatives en mettant les coefficients des autres à 0
+perm_rgcca_spar = rgcca_permutation(LLL, connection = C, par_type = "sparsity", n_cores = 1)
+#summary(perm_rgcca_spar) 
+plot(perm_rgcca_spar)
+fit = rgcca(perm_rgcca_spar) #fait une rgcca avec le valeurs optimales calculées avec rgcca_permutation
+#summary(fit) #Permet de voir le nombre de variables gardées par famille et la valeur du sparsity parameter
+```
+
+Le code suivant tourne pendant une minute. Les weigths de chaque exposome, représentant leur corrélation avec la famille “built environment” ou d’après notre hypothèse initiale le fait de vivre dans un milieu urbain, sont représentés dans le graphe ci dessous :
+
+```{r, include = FALSE}
+boot_out = rgcca_bootstrap(fit)
+```
+
+```{r, echo = FALSE}
+plot(boot_out, display_order = F, n_mark = 1000, cex = .6, block = 1:18, type = "weights") #affichage bootstrap
+#plot(fit, block = 18) #affichage des variables les plus significatives dans la famille built_environment
+
+
+#Selection variables les plus significatives ne passant pas par 0 :
+xxx = boot_out$stats[boot_out$stats$type == "weights", ]
+test1 = xxx[xxx$lower_bound > 0 | xxx$upper_bound<0,]
+top_weigth = test1$var[order(abs(test1$estimate), decreasing = T)]
+#top_weigth = top_weigth[1:15]
+# xxx = boot_out$stats[boot_out$stats$type == "weights", ]
+# top_10_weigth = xxx$var[order(abs(xxx$estimate), decreasing = T)][1:10]
+# print(top_10_weigth)
+```
+
+Dans la mesure où la méthode RGCCA contient une part d’aléatoire, les résultats affichés ne seront jamais les mêmes.Cependant ils sont toujours relativement similaires.
+Nous pouvons observer que certaines familles sortent du lot.
+C’est le cas de air pollution et indoor air.
+La pollution était plus importante dans les villes, cela est logique.
+Noise et natural spaces sont aussi fortement corrélés.
+Nous remarquons que la famille “built environnement” est significative, ce à quoi on s’attendait.
+
+Une fois les variables valant potentiellement zéro écartées, nous observons les exposomes classés par significité décroissante.
+Voici les 10 premiers dans notre cas : 
+
+- "hs_pbde47_madj_Log2" 
+
+- "FAS_cat_None" 
+
+- "hs_dep_madj_Log2" 
+
+- "h_bro_preg_Log"
+
+- "hs_lden_cat_s_None" 
+
+- "h_thm_preg_Log" 
+
+- "hs_oxbe_cadj_Log2" 
+
+- "h_Absorbance_Log"
+
+- "hs_pfhxs_m_Log2" 
+
+- "h_trafnear_preg_pow1over3"
+
+On retrouve des exposomes des familles citées précédemment, tels que "h_bro_preg_Log" from “Noise” family.
+Mais aussi d’autres familles telles que le taux de Polybrominated diphenyl ethers (PBDE) ("hs_pbde47_madj_Log2"), the Social and Economic Capital ("FAS_cat_None") ou encore les pesticides ("hs_dep_madj_Log2").
+
+### Clustering
+
+Nous avons tenté d'effectuer un clustering afin de déterminer s'il était possible de distinguer deux groupes distincts (ville et non-ville) en fonction des variables de la famille build_environment.
+Pour ce faire, nous avons utilisé une classification par k-means.
+L'objectif était d'examiner si les caractéristiques de l'environnement construit pouvaient naturellement séparer les individus vivant en milieu urbain de ceux vivant en milieu rural.
+Cependant, les résultats de ces analyses n'ont pas été concluants.
+Les clusters obtenus ne permettent pas de distinguer clairement 2 catégories attendues de ville et non-ville.La proximité des deux groupes identifiés et le fait qu'ils présentent la même taille environ nous laisse penser que le clustering a forcé une distinction en imposant le plan médian des données comme frontière.
+Les variables de build_environment ne semblent pas avoir une capacité discriminante suffisante pour distinguer ces deux groupes.
+
+```{r, include=FALSE}
+# Charger les bibliothèques nécessaires
+library(readxl)
+library(ggplot2)
+library(dplyr)
+built_environment_vars <- codebook$variable_name[codebook$family %in% "Built environment"]
+print(length(built_environment_vars))
+
+built_environment = exposome[, built_environment_vars]
+built_environment_scaled = scale(built_environment)
+
+# Identifier les variables de la famille "Built environment"
+built_environment_vars <- codebook$variable_name[codebook$family %in% "Built environment"]
+
+# Vérifier les variables identifiées
+print(length(built_environment_vars))
+print(built_environment_vars)
+
+# Sélectionner ces variables dans les données
+built_environment_data <- exposome[ ,built_environment_vars]
+
+# Vérifier les données sélectionnées
+head(built_environment_data)
+```
+
+```{r, include=FALSE}
+library(dplyr)
+
+# Supposons que 'h_cohort' est une colonne dans votre dataframe exposome
+# et que vous souhaitez centrer-réduire les variables de 'built_environment_data' pour chaque niveau de 'h_cohort'
+# Identifier les variables binaires
+binary_vars <- built_environment_vars[sapply(exposome[, built_environment_vars], function(x) all(x %in% c(0, 1)))]
+
+# Identifier les variables continues
+continuous_vars <- setdiff(built_environment_vars, binary_vars)
+
+# Vérifier les types de données des colonnes sélectionnées
+print(sapply(exposome[, built_environment_vars], class))
+
+grouped_data <- built_environment%>%
+  group_by(covariates$h_cohort) %>%
+  mutate(across(all_of(continuous_vars), ~ scale(.) %>% as.vector)) %>%
+  ungroup()
+
+# Conserver les variables binaires inchangées
+normalized_data <- grouped_data %>%
+  mutate(across(all_of(binary_vars), ~ exposome[[cur_column()]]))
+
+final_data <- normalized_data %>%
+  select(-all_of(binary_vars))
+
+final_data <- final_data %>%
+  select(-'covariates$h_cohort')
+
+```
+
+```{r, echo=FALSE}
+
+wss <- (nrow(final_data)-1)*sum(apply(final_data, 2, var))
+for (i in 2:15) wss[i] <- sum(kmeans(normalized_data, centers=i)$withinss)
+
+plot(1:15, wss, type="b", xlab="Number of Clusters", ylab="Within groups sum of squares")
+
+set.seed(123)
+k <- 2
+kmeans_result <- kmeans(final_data, centers=k)
+
+exposome$cluster <- kmeans_result$cluster
+
+# Effectuer une ACP
+pca_result <- prcomp(final_data, scale. = TRUE)
+
+pca_data <- as.data.frame(pca_result$x[, 1:2])
+colnames(pca_data) <- c("PC1", "PC2")
+
+pca_data$cluster <- as.factor(exposome$cluster)
+
+
+loadings <- as.data.frame(pca_result$rotation[, 1:2])
+loadings$variable <- rownames(loadings)
+
+fviz_pca_biplot(pca_result, habillage = kmeans_result$cluster, axes = 1:2)
+```
+
+### Heatmap des p-values
+
+Il est maintenant temps de faire une étude, variable par variable, de l'influence de celles-ci sur le développement cognitif des individus.
+Pour caractériser ce développement cognitif, nous considérerons les phénotypes de quotient intellectuel (*hs correct raven*) et de comportement neurlogique (*hs Gen Tot*).
+
+Pour représenter ces corrélations entre variables et phénotypes, nous utiliserons des *heatmap* des p-valeurs obtenues par test anova.
+
+```{r, include = FALSE}
+
+built_environment_vars <- codebook$variable_name[codebook$family == "Built environment"]
+air_pollution_vars <- codebook$variable_name[codebook$family == "Air Pollution"]
+indoor_air_vars <- codebook$variable_name[codebook$family == "Indoor air"]
+lifestyle_vars <- codebook$variable_name[codebook$family == "Lifestyle"]
+metals_vars <- codebook$variable_name[codebook$family == "Metals"]
+meteorological_vars <- codebook$variable_name[codebook$family == "Meteorological"]
+natural_spaces_vars <- codebook$variable_name[codebook$family == "Natural Spaces"]
+noise_vars <- codebook$variable_name[codebook$family == "Noise"]
+organochlorines__vars <- codebook$variable_name[codebook$family == "Organochlorines"]
+organophosphate_pesticides_vars <- codebook$variable_name[codebook$family == "Organophosphate pesticides"]
+BPDE_vars <- codebook$variable_name[codebook$family == "Polybrominated diphenyl ethers (PBDE)"]
+PFAS_vars <- codebook$variable_name[codebook$family == "Per- and polyfluoroalkyl substances (PFAS)"]
+phenols_vars <- codebook$variable_name[codebook$family == "Phenols"]
+phthalates_vars <- codebook$variable_name[codebook$family == "Phthalates"]
+social_economic_capital_vars <- codebook$variable_name[codebook$family == "Social and economic capital"]
+tabacco_smoke_vars <- codebook$variable_name[codebook$family == "Tobacco Smoke"]
+traffic_vars <- codebook$variable_name[codebook$family == "Traffic"]
+water_DBPs_vars <- codebook$variable_name[codebook$family == "Water DBPs"]
+
+
+built_environment = exposome[, built_environment_vars]
+
+L = list(air_pollution = exposome[, air_pollution_vars],
+         indoor_air = exposome[, indoor_air_vars],
+         lifestyle = exposome[, lifestyle_vars],
+         metals = exposome[, metals_vars],
+         meteorological = exposome[, meteorological_vars],
+         natural_spaces = exposome[, natural_spaces_vars],
+         noise = exposome[, noise_vars],
+         organochlorines = exposome[,organochlorines__vars ],
+         organophosphate_pesticides = exposome[, organophosphate_pesticides_vars],
+         BPDE = exposome[, BPDE_vars],
+         PFAS = exposome[, PFAS_vars],
+         phenols = exposome[, phenols_vars],
+         phthalates = exposome[, phthalates_vars],
+         social_economic_capital = exposome[, social_economic_capital_vars],
+         tabacco_smoke = exposome[, tabacco_smoke_vars],
+         traffic = exposome[, traffic_vars],
+         water_DBPs = exposome[, water_DBPs_vars],
+         built_environment = built_environment)
+
+C = matrix(data = c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+                    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0), nrow=18, ncol=18)
+
+tau = c(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+
+result_rgcca = rgcca(L, connection = C, tau=tau)
+
+boot_out = rgcca_bootstrap(result_rgcca)
+## au dessus je viens de rajouter kf iuerznvhgriuzb,uygtienbghiuten,bhtvjforiz,buhçi,zv,hg;re,sfk;j
+result <- boot_out$stats 
+```
+
+```{r, echo = FALSE}
+interesting_variables = result$var[(result$lower_bound > 0 | result$upper_bound < 0) & !(result$var %in% built_environment_vars)]
+
+l = length(interesting_variables)
+
+exposome_interesting <- exposome[, interesting_variables]
+
+df = data.frame(exposome_interesting, 
+                cohort = covariates$h_cohort,
+                phenotype[, 4:5])
+
+column_names_exposome <- colnames(exposome_interesting)
+column_names_phenotypes <- colnames(phenotype)
+
+p_value_table = matrix(NA, nrow = ncol(exposome_interesting), ncol = 2)
+
+
+for (i in 1:ncol(exposome_interesting)) {
+    fit0 = glm(phenotype$hs_correct_raven~covariates$h_cohort , family = poisson, data  = df)
+    fit1 = glm(phenotype$hs_correct_raven~covariates$h_cohort + exposome_interesting[,i], family = poisson, data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 1] = p_val
+}
+
+for (i in 1:ncol(exposome_interesting)) {
+    fit0 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort , family = gaussian(), data  = df)
+    fit1 = glm(phenotype$hs_Gen_Tot~covariates$h_cohort + exposome_interesting[,i], family = gaussian(), data  = df)
+    res = anova(fit0, fit1, test = "LRT")
+    p_val <- res$Pr[2]
+    p_value_table[i, 2] = p_val
+}
+
+rownames(p_value_table) <- colnames(exposome_interesting)
+colnames(p_value_table) <- c("hs_correct_raven", "hs_Gen_Tot")
+
+pheatmap(p_value_table, 
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         fontsize = 10,
+         main = "Heatmap of p-values")
+```
+
+Pour permettre une vision plus claire des résultats obtenus, nous allons faire une disjonction binaire des variables selon la position des p-valeurs associées par rapport au seuil de corrélation 0.05
+
+```{r, echo = FALSE}
+
+p_value_bin = matrix(NA, nrow = ncol(exposome_interesting), ncol = 2)
+
+for (i in 1:ncol(exposome_interesting)) {
+    if (p_value_table[i, 1] < 0.05) {
+        p_value_bin[i, 1] = 1
+    } else {
+        p_value_bin[i, 1] = 0
+    }
+}
+
+for (i in 1:ncol(exposome_interesting)) {
+    if (p_value_table[i, 2] < 0.05) {
+        p_value_bin[i, 2] = 1
+    } else {
+        p_value_bin[i, 2] = 0
+    }
+}
+
+colnames(p_value_bin) <- c("hs_correct_raven", "hs_Gen_Tot")
+rownames(p_value_bin) <- colnames(exposome_interesting)
+
+p_value_bin_color <- ifelse(p_value_bin == 1, "black", "white")
+
+pheatmap(p_value_bin, 
+         color = c("white", "black"),
+         fontsize = 10,
+         main = "Heatmap of p-value binary")
+```
+
+Enfin, pour finir sur l'étude univariée, on observe uniquement les variables fortement corrélées aux deux phénotypes d'intérêt.
+
+```{r, echo = FALSE}
+variables_high <- rownames(p_value_bin)[which(p_value_bin[, 1] == 1 & p_value_bin[, 2] == 1)]
+
+explained_variables <- data.frame(
+    name = variables_high[1:11],
+    description = codebook$description[which(codebook$variable_name %in% variables_high)])
+
+#Le 11 est là pour éviter des variables qui se répètent avec un "1" apparaissant derrière (étonnant)
+
+kable(explained_variables)
+```
+
+Avant de futures conclusions sur ces résultats obtenus, 
+il est satisfaisant de constater que des facteurs déjà connus pour avoir une influence sur le développement cognitif des individus, ont été mis en évidence par cette étude.
+On retrouve notamment l'exposition au plomb, la présence d'animaux domestiques, la concentration en micro-particules ou encore la présence de Polychlorinated biphenyl-170.
+
+### GLM
+
+L'analyse RGCCA a été utilisée pour identifier les variables de l'environnement bâti qui sont corrélées avec d'autres blocs de données environnementales.
+Une fois les variables corrélées identifiées, des modèles de régression GLM ont été utilisés pour évaluer l'association entre ces variables de l'environnement bâti et les phénotypes d'intérêt (hs_Gen_Tot et hs_correct_raven).
+Les coefficients de régression (beta coefficients) et les p-values ont donc été extraits pour chaque variable.
+Ces volcano plots présentent -log10(p-value), permettant d'identifier rapidement les variables ayant des effets significatifs et importants avec une ligne en pointillés à y = 1.301 correspondant au seuil de p-value de 0.05.
+
+```{r, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(readxl)
+
+
+
+# Vérifier les noms de colonnes pour le phénotype "Behavior"
+phenotype_column <- grep("hs_Gen_Tot", colnames(phenotype), value = TRUE)
+print(phenotype_column)  # Afficher le nom exact de la colonne
+
+# Vérifier les colonnes existantes dans le codebook et exposome
+valid_numeric_vars <- codebook$variable_name[codebook$var_type == "numeric" & codebook$variable_name %in% colnames(exposome)]
+valid_factor_vars <- codebook$variable_name[codebook$var_type == "factor" & codebook$variable_name %in% colnames(exposome)]
+
+# Sélectionner les variables de la famille "Built environment"
+built_environment_vars <- codebook$variable_name[codebook$family == "Built environment" & codebook$variable_name %in% colnames(exposome)]
+
+# Ajouter les colonnes des phénotypes "hs_Gen_Tot" et "hs_correct_raven" au DataFrame
+phenotype_columns <- c("hs_Gen_Tot", "hs_correct_raven")
+exposome$hs_Gen_Tot <- phenotype$hs_Gen_Tot
+exposome$hs_correct_raven <- phenotype$hs_correct_raven
+
+# Fonction pour effectuer la régression linéaire et extraire les coefficients et p-values
+glm_results <- function(data, phenotype) {
+  results <- data.frame()
+
+  for (variable in top_weigth) {
+    formula <- as.formula(paste(phenotype, "~", variable))
+    model <- lm(formula, data = data)
+    tidy_model <- tidy(model)
+    tidy_model <- tidy_model %>% filter(term == variable)
+    tidy_model$variable <- variable
+    results <- rbind(results, tidy_model)
+  }
+  
+  return(results)
+}
+
+# Stocker les résultats des GLM pour les deux phénotypes
+results_all <- data.frame()
+
+for (phenotype in phenotype_columns) {
+  results <- glm_results(exposome, phenotype)
+  results$phenotype <- phenotype
+  results_all <- rbind(results_all, results)
+}
+
+```
+
+#### Volcano Plot pour hs_Gen_Tot - Comportement des enfants (en bleu)
+
+```{r, echo=FALSE}
+# Créer un forest plot pour hs_Gen_Tot
+results_gen_tot <- results_all %>% filter(phenotype == "hs_Gen_Tot")
+ggplot(results_gen_tot, aes(x = estimate, y = reorder(variable, estimate), xmin = estimate - 1.96 * std.error, xmax = estimate + 1.96 * std.error)) +
+  geom_pointrange() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  xlab("Beta Coefficient") +
+  ylab("Variable") +
+  ggtitle("Influence des variables de l'environnement bâti sur le comportement des enfants (hs_Gen_Tot)") +
+  theme_minimal()
+```
+
+On observe que les variables "h_fdensity300_preg_Log", "hs_cs_m_Log2", "hs_pm10_yr_hs_h_None" et "hs_pm25_yr_hs_h_None" se trouvent en haut du graphe ce qui montre leur forte significativité.
+
+#### Volcano Plot pour hs_correct_raven - QI des enfants (en rouge)
+
+```{r, echo=FALSE}
+# Créer un forest plot pour hs_correct_raven
+results_correct_raven <- results_all %>% filter(phenotype == "hs_correct_raven")
+ggplot(results_correct_raven, aes(x = estimate, y = reorder(variable, estimate), xmin = estimate - 1.96 * std.error, xmax = estimate + 1.96 * std.error)) +
+  geom_pointrange() +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  xlab("Beta Coefficient") +
+  ylab("Variable") +
+  ggtitle("Influence des variables de l'environnement bâti sur le comportement des enfants (hs_correct_raven)") +
+  theme_minimal()
+
+
+```
+
+On observe que les variables "hs_pm10_yr_hs_h_None", "hs_pm25_yr_hs_h_None" et "hs_dde_madj_Log2" se trouvent en haut du graphe ce qui montre leur forte significativité.
+
+```{r, echo=FALSE}
+xxxx = as.data.frame(results)
+
+
+ggplot(results_all, aes(x = estimate, y = -log10(p.value), label = variable, color = phenotype)) +
+  geom_point() +
+  geom_text(vjust = -0.5, size = 3) +
+  geom_hline(yintercept = 1.301, linetype = "dashed") +
+  xlab("Beta Coefficient") +
+  ylab("-Log10(p-value)") +
+  ggtitle("Beta Coefficients vs -Log10(p-value) for Built Environment Variables") +
+  theme_minimal()
+```
+
+
+## IV. Discussions
+
+
+Nous n’avons pas obtenu de résultats concluants sur la création d’une variable *urbanization rate* à l’aide du clustering. Comme expliqué dans l'analyse des résultats, l’interprétation du clustering nous a paru trop flou pour en tirer des conclusions. Non seulement les résultats sont peu concluants, mais nous n’avons pas davantage pris en compte l’influence des facteurs de confusion. En effet, après obtention des résultats du clustering, cette partie de la démarche nous a paru moins pertinente au regard de la problématique étudiée et de la configuration du jeu de données, en prenant en compte la contrainte de temps du projet. 
+
+La méthode RGCCA étant aléatoire, les volcano plots générés ne sont pas toujours identiques mais certaines variables restent significatives même après plusieurs compilations. Les volcano plots présentés dans les documents fournis montrent les résultats des analyses pour les phénotypes hs_Gen_Tot et hs_correct_raven, en fonction des variables de l'environnement bâti. 
+Notons également que le passage par la méthode RGCCA fausse le signe des corrélations, et il faut avoir recours aux connaissances dont nous disposons sur le jeu de données pour analyser l'influence des facteurs sur les phénotypes d'intérêts.  
+On remarque alors que la famille “Air Pollution” a un grand impact sur le QI et le comportement des enfants. On peut donc conclure qu’une exposition accrue à la pollution atmosphérique particulaire prénatale et postnatale dans une zone d’air pollué (urbaine) peut avoir des effets neurotoxiques qui peuvent varier pour différents domaines cognitifs ou comportementaux. Cela est notamment confirmé par l’article “Prenatal particulate air pollution and neurodevelopment in urban children” by (Yueh-Hsiu Mathilda Chiu, Hsiao-Hsien Leon Hsu, Brent A. Coull, David C. Bellinger, Itai Kloog, Joel Schwartz, Robert O. Wright, Rosalind J. Wright, 2016)*.
+
+L'intérêt de notre démarche a été de pouvoir mettre place des méthodes univariées et multivariées. On obtient donc différents types de résultats qui contiennent 
+
+En ce qui concerne les faiblesses de notre méthode, outre le fait que la constiturion d'une variable *urbanization rate* n'a pas été concluante, nous n'avons pas traiter en profondeur la question des facteurs de confusion hors celui de la cohorte, ce qui pourrait avoir une influence sur nos résultats.
+
+## V. Conclusion
+
+L'absence de variable explicite sur le type de milieu urbain ou rural dans le jeu de données complique l'étude des facteurs urbains car nous avons dû recourrir à des méthodes particulières pour extraire cette information des autres variables. Si la création d'une variable *urbanization rate* n'est pas pertinente car trop complexe, nous avons pu dégager l'influence de quelques facteurs typiques du milieu urbain sur le développememnt cognitif des enfants. Les pollutions atmosphériques, en particulier les particules fines (PM10 et PM2.5), et certains composés chimiques comme les PBDE, ont un impact significatif sur le développement neuronal des enfants, ce que certaines études corroborrent. Des analyses plus approfondies sont nécessaires pour confirmer ces conclusions et traiter les facteurs de confusion de manière exhaustive. 
+
+référence : https://www.sciencedirect.com/science/article/pii/S0160412015300945 
